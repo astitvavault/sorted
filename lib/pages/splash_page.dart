@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
-import 'package:todo_app/pages/homepage.dart';
+import 'package:todo_app/pages/main_layout.dart';
 
 class splashPage extends StatefulWidget {
   const splashPage({super.key});
@@ -16,39 +16,37 @@ class _splashPageState extends State<splashPage> {
       super.initState();
       Timer(Duration(seconds: 2), () {
         Navigator.pushReplacement(context,
-            MaterialPageRoute(builder : (contex) => Homepage()));
+            MaterialPageRoute(builder : (context) => const MainLayout()));
       });
     }
 
     Widget build(BuildContext context){
       return Scaffold(
-        backgroundColor: Colors.black12,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.asset(
-              "assets/download.jpg",
-              fit: BoxFit.cover,
-            ),
-            Container(
-                color: Colors.black.withOpacity(0.8),
-            ),
-            Center(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SvgPicture.asset(
-                    "assets/icons8-hard-working-48.svg",
-                    width: 140,
-                    height: 140,
-                    alignment: Alignment.centerRight,
-                  ),
-                  Text("GRIND", style: TextStyle(color: Colors.white, fontSize: 35),)
-                ],
+        backgroundColor: const Color(0xFF121212),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFD4B483),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.rocket_launch, size: 80, color: Colors.black),
               ),
-            ),
-          ],
+              const SizedBox(height: 20),
+              const Text(
+                "Sorted",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 40,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2,
+                ),
+              )
+            ],
+          ),
         ),
       );
     }

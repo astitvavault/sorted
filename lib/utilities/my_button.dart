@@ -13,8 +13,10 @@ class MyButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialButton(
       onPressed: onPressed,
-      color: Colors.blueGrey,
+      color: const Color(0xFFD4B483),
+      textColor: Colors.black,
       height: 40,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: Text(text),
     );
   }

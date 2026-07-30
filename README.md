@@ -1,6 +1,6 @@
-# todo_app
+# Sorted
 
-A new Flutter project.
+A sleek, modern task management app inspired by MindFlow and productivity principles, redesigned with a beige-accented dark theme.
 
 ## Getting Started
 
