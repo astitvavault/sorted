@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:todo_app/data/database.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:todo_app/models/meeting.dart';
+import 'package:todo_app/models/reminder.dart';
+import 'package:todo_app/services/meeting_service.dart';
+import 'package:todo_app/services/reminder_service.dart';
 import 'package:intl/intl.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -13,10 +16,12 @@ class CalendarPage extends StatefulWidget {
 
 class _CalendarPageState extends State<CalendarPage> {
   ToDoDatabase db = ToDoDatabase();
-  final _MyBox = Hive.box('MyBox');
+  final ReminderService _reminderService = ReminderService();
+  final MeetingService _meetingService = MeetingService();
 
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
+  bool _isLoading = true;
 
   // Controllers for inputs
   final _taskController = TextEditingController();
@@ -33,9 +38,15 @@ class _CalendarPageState extends State<CalendarPage> {
   @override
   void initState() {
     super.initState();
-    db.loadData();
     _selectedDay = _focusedDay;
-    _loadDayData(_selectedDay!);
+    _refreshData();
+  }
+
+  Future<void> _refreshData() async {
+    await db.loadData();
+    if (mounted) {
+      _loadDayData(_selectedDay!);
+    }
   }
 
   void _loadDayData(DateTime date) {
@@ -45,54 +56,65 @@ class _CalendarPageState extends State<CalendarPage> {
       _currentDayData["tasks"] ??= [];
       _currentDayData["meetings"] ??= [];
       _currentDayData["reminders"] ??= [];
+      _isLoading = false;
     });
   }
 
-  void _saveCurrentDayData() {
-    if (_selectedDay != null) {
-      db.saveDataForDate(_selectedDay!, _currentDayData);
-    }
-  }
-
-  void _addTask() {
+  void _addTask() async {
     if (_taskController.text.isNotEmpty) {
-      setState(() {
-        // [name, completed, isHighPriority, timerInSeconds, description, taskTime]
-        _currentDayData["tasks"].add([
-          _taskController.text, 
-          false, 
-          false, 
-          0, 
-          "", 
-          DateFormat.jm().format(DateTime.now())
-        ]);
-        _taskController.clear();
-      });
-      _saveCurrentDayData();
+      String title = _taskController.text;
+      _taskController.clear();
+      await db.addTask([
+        title, 
+        false, 
+        false, 
+        0, 
+        "", 
+        DateFormat.jm().format(DateTime.now())
+      ], date: _selectedDay);
+      _loadDayData(_selectedDay!);
     }
   }
 
-  void _addMeeting() {
+  void _addMeeting() async {
+    int? profileId = db.profileData["id"];
+    if (profileId == null) return;
+
     if (_meetingTitleController.text.isNotEmpty) {
-      setState(() {
-        _currentDayData["meetings"].add({
-          "title": _meetingTitleController.text,
-          "link": _meetingLinkController.text,
-        });
-        _meetingTitleController.clear();
-        _meetingLinkController.clear();
-      });
-      _saveCurrentDayData();
+      String title = _meetingTitleController.text;
+      String link = _meetingLinkController.text;
+      String date = DateFormat('yyyy-MM-ddTHH:mm:ss').format(_selectedDay!);
+      
+      _meetingTitleController.clear();
+      _meetingLinkController.clear();
+
+      Meeting newMeeting = Meeting(
+        title: title, 
+        location: link, 
+        meetingTime: date,
+        profileId: profileId,
+      );
+      await _meetingService.createMeeting(newMeeting);
+      _refreshData();
     }
   }
 
-  void _addReminder() {
+  void _addReminder() async {
+    int? profileId = db.profileData["id"];
+    if (profileId == null) return;
+
     if (_reminderController.text.isNotEmpty) {
-      setState(() {
-        _currentDayData["reminders"].add(_reminderController.text);
-        _reminderController.clear();
-      });
-      _saveCurrentDayData();
+      String text = _reminderController.text;
+      String date = DateFormat('yyyy-MM-ddTHH:mm:ss').format(_selectedDay!);
+      _reminderController.clear();
+
+      Reminder newReminder = Reminder(
+        title: text, 
+        reminderTime: date,
+        profileId: profileId,
+      );
+      await _reminderService.createReminder(newReminder);
+      _refreshData();
     }
   }
 
@@ -105,6 +127,12 @@ class _CalendarPageState extends State<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF121212),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFD4B483))),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
       appBar: AppBar(
@@ -193,7 +221,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
                   // Custom Reminder Section
                   _buildSectionTitle("Reminders"),
-                  ...(_currentDayData["reminders"] as List).map((r) => _buildItemTile(r, Icons.notification_important, type: 'reminder')),
+                  ...(_currentDayData["reminders"] as List).map((r) => _buildItemTile(r['text'] ?? r['title'] ?? '', Icons.notification_important, id: r['id'], type: 'reminder')),
                   _buildInputRow(_reminderController, "Set a reminder...", _addReminder),
                   
                   const Divider(color: Colors.white10, height: 40),
@@ -272,7 +300,6 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Widget _buildTaskTile(dynamic task) {
-    // Ensure task is a list [name, completed, ..., description, taskTime]
     String name = task is List ? task[0] : task.toString();
     bool isCompleted = task is List && task.length > 1 ? task[1] : false;
     String description = task is List && task.length > 4 ? task[4] : "";
@@ -291,13 +318,13 @@ class _CalendarPageState extends State<CalendarPage> {
           Row(
             children: [
               GestureDetector(
-                onTap: () {
+                onTap: () async {
                   setState(() {
                     if (task is List && task.length > 1) {
                       task[1] = !task[1];
                     }
                   });
-                  _saveCurrentDayData();
+                  await db.updateTask(task, date: _selectedDay);
                 },
                 child: Icon(
                   isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
@@ -316,11 +343,10 @@ class _CalendarPageState extends State<CalendarPage> {
                 ),
               ),
               GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _currentDayData["tasks"].remove(task);
-                  });
-                  _saveCurrentDayData();
+                onTap: () async {
+                  int? id = task.length > 6 ? task[6] : null;
+                  await db.deleteTask(id);
+                  _refreshData();
                 },
                 child: const Icon(Icons.close, color: Colors.white38, size: 18),
               ),
@@ -347,7 +373,7 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  Widget _buildItemTile(String text, IconData icon, {required String type}) {
+  Widget _buildItemTile(String text, IconData icon, {int? id, required String type}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -363,13 +389,13 @@ class _CalendarPageState extends State<CalendarPage> {
             child: Text(text, style: const TextStyle(color: Colors.white70)),
           ),
           GestureDetector(
-            onTap: () {
-              setState(() {
+            onTap: () async {
+              if (id != null) {
                 if (type == 'reminder') {
-                  _currentDayData["reminders"].remove(text);
+                  await _reminderService.deleteReminder(id);
                 }
-              });
-              _saveCurrentDayData();
+                _refreshData();
+              }
             },
             child: const Icon(Icons.close, color: Colors.white38, size: 18),
           ),
@@ -381,6 +407,8 @@ class _CalendarPageState extends State<CalendarPage> {
   Widget _buildMeetingTile(dynamic meeting) {
     String title = meeting['title'] ?? "";
     String link = meeting['link'] ?? "";
+    int? id = meeting['id'];
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -403,11 +431,11 @@ class _CalendarPageState extends State<CalendarPage> {
             ),
           ),
           GestureDetector(
-            onTap: () {
-              setState(() {
-                _currentDayData["meetings"].remove(meeting);
-              });
-              _saveCurrentDayData();
+            onTap: () async {
+              if (id != null) {
+                await _meetingService.deleteMeeting(id);
+                _refreshData();
+              }
             },
             child: const Icon(Icons.close, color: Colors.white38, size: 18),
           ),

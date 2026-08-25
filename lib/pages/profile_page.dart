@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:todo_app/data/database.dart';
 
+import 'package:todo_app/pages/profile_manager_page.dart';
+
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -48,6 +50,12 @@ class _ProfilePageState extends State<ProfilePage> {
         elevation: 0,
         title: const Text("Profile", style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileManagerPage())),
+            icon: const Icon(Icons.group_outlined, color: Color(0xFFD4B483)),
+          )
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 30),

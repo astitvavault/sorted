@@ -4,6 +4,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:todo_app/data/database.dart';
 import 'package:todo_app/pages/main_layout.dart';
+import '../models/profile.dart';
+import '../services/profile_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -14,12 +16,14 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final ToDoDatabase db = ToDoDatabase();
+  final ProfileService _profileService = ProfileService();
   final _nameController = TextEditingController();
   final _bioController = TextEditingController();
   
   DateTime? _selectedDate;
   File? _image;
   final _picker = ImagePicker();
+  bool _isSaving = false;
 
   Future<void> _pickImage() async {
     final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
@@ -57,7 +61,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _saveProfile() {
+  Future<void> _saveProfile() async {
     if (_nameController.text.isEmpty || _selectedDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter your name and birth date")),
@@ -65,19 +69,45 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    db.profileData = {
-      "name": _nameController.text,
-      "bio": _bioController.text,
-      "birthDate": _selectedDate!.toIso8601String(),
-      "imagePath": _image?.path ?? "",
-      "isRegistered": true,
-    };
-    db.updateData();
+    setState(() {
+      _isSaving = true;
+    });
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const MainLayout()),
-    );
+    try {
+      Profile newProfile = Profile(
+        fullName: _nameController.text,
+        bio: _bioController.text,
+        birthDate: DateFormat('yyyy-MM-dd').format(_selectedDate!),
+        profileImage: _image?.path, // Backend might expect a URL, but we'll send local path for now
+      );
+
+      // Create on backend
+      Profile createdProfile = await _profileService.createProfile(newProfile);
+
+      // Save returned ID and metadata locally
+      db.profileData = createdProfile.toJson();
+      db.profileData["isRegistered"] = true;
+      db.updateData();
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const MainLayout()),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to create profile: $e")),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
   }
 
   @override
@@ -207,16 +237,18 @@ class _LoginPageState extends State<LoginPage> {
                 width: double.infinity,
                 height: 60,
                 child: ElevatedButton(
-                  onPressed: _saveProfile,
+                  onPressed: _isSaving ? null : _saveProfile,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFD4B483),
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                   ),
-                  child: const Text(
-                    "GET STARTED",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1.2),
-                  ),
+                  child: _isSaving 
+                    ? const CircularProgressIndicator(color: Colors.black)
+                    : const Text(
+                        "GET STARTED",
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1.2),
+                      ),
                 ),
               ),
             ],
@@ -243,7 +275,7 @@ class _LoginPageState extends State<LoginPage> {
       filled: true,
       fillColor: const Color(0xFF1E1E1E),
       enabledBorder: OutlineInputBorder(
-        borderSide: BorderSide(color: Colors.white.withOpacity(0.05)),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
         borderRadius: BorderRadius.circular(15),
       ),
       focusedBorder: OutlineInputBorder(

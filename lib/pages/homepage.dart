@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
-import 'package:hive_flutter/adapters.dart';
 import 'package:intl/intl.dart';
 import 'package:todo_app/data/database.dart';
 import 'package:todo_app/utilities/dialog_box.dart';
 import 'package:todo_app/utilities/to_do_tile.dart';
 
 class Homepage extends StatefulWidget {
-
   const Homepage({super.key});
 
   @override
@@ -17,33 +14,37 @@ class Homepage extends StatefulWidget {
 class _HomepageState extends State<Homepage> {
   final _titleController = TextEditingController();
   final _descController = TextEditingController();
-  final _MyBox  = Hive.box('MyBox');
   ToDoDatabase db = ToDoDatabase();
   String _selectedFilter = "All";
+  bool _isLoading = true;
 
   @override
   void initState() {
-    if(_MyBox.get("TODOLIST") == null){
-      db.createInitialData();
-    }
-    else{
-      db.loadData();
-    }
     super.initState();
+    _loadInitialData();
   }
 
-  void checkBoxChanged(bool? value, int index) {
+  Future<void> _loadInitialData() async {
+    await db.loadData();
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  void checkBoxChanged(bool? value, int index) async {
     setState(() {
       db.toDoList[index][1] = !db.toDoList[index][1];
       if (db.toDoList[index][1] == true) {
         db.toDoList[index][3] = 0;
-
       }
     });
-    db.updateData();
+    // Call API to update
+    await db.updateTask(db.toDoList[index]);
   }
 
-  void saveNewTask(bool isHighPriority, String timerText) {
+  void saveNewTask(bool isHighPriority, String timerText) async {
     int timerInSeconds = 0;
     int? endTime;
 
@@ -53,21 +54,24 @@ class _HomepageState extends State<Homepage> {
       endTime = DateTime.now().millisecondsSinceEpoch + (timerInSeconds * 1000);
     }
 
-    setState(() {
-      db.toDoList.add([
-        _titleController.text,      // task name
-        false,                     // completed
-        isHighPriority,            // priority
-        endTime ?? 0,              // store END TIME
-        _descController.text,       // description
-        DateFormat.jm().format(DateTime.now()), // task time
-      ]);
-      _titleController.clear();
-      _descController.clear();
-    });
+    String title = _titleController.text;
+    String desc = _descController.text;
+    String time = DateFormat.jm().format(DateTime.now());
 
+    _titleController.clear();
+    _descController.clear();
     Navigator.of(context).pop();
-    db.updateData();
+
+    await db.addTask([
+      title,
+      false,
+      isHighPriority,
+      endTime ?? 0,
+      desc,
+      time,
+    ]);
+    
+    _loadInitialData(); // Refresh list
   }
 
   void editTask(int index) {
@@ -80,13 +84,12 @@ class _HomepageState extends State<Homepage> {
         return DialogBox(
           titleController: _titleController,
           descController: _descController,
-          onSave: (isHighPriority, timerText) {
-            int timerInSeconds = 0;
+          onSave: (isHighPriority, timerText) async {
             int? endTime;
 
             if (isHighPriority) {
               int minutes = int.tryParse(timerText) ?? 0;
-              timerInSeconds = minutes * 60;
+              int timerInSeconds = minutes * 60;
               endTime = DateTime.now().millisecondsSinceEpoch + (timerInSeconds * 1000);
             }
 
@@ -95,14 +98,13 @@ class _HomepageState extends State<Homepage> {
               db.toDoList[index][2] = isHighPriority;
               db.toDoList[index][3] = endTime ?? 0;
               db.toDoList[index][4] = _descController.text;
-              // Keep original creation time? Or update it? User said "real time tag".
-              // Usually creation time stays the same.
             });
             
             _titleController.clear();
             _descController.clear();
             Navigator.of(context).pop();
-            db.updateData();
+            
+            await db.updateTask(db.toDoList[index]);
           },
           onCancel: () {
             _titleController.clear();
@@ -132,14 +134,25 @@ class _HomepageState extends State<Homepage> {
     );
   }
 
-  void deleteTask(int index) {
+  void deleteTask(int index) async {
+    int? id = db.toDoList[index].length > 6 ? db.toDoList[index][6] : null;
     setState(() {
       db.toDoList.removeAt(index);
     });
-    db.updateData();
+    if (id != null) {
+      await db.deleteTask(id);
+    }
   }
+
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF121212),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFD4B483))),
+      );
+    }
+
     List filteredTasks = db.toDoList;
     if (_selectedFilter == "In Progress") {
       filteredTasks = db.toDoList.where((t) => t[1] == false).toList();
@@ -151,6 +164,11 @@ class _HomepageState extends State<Homepage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
+      floatingActionButton: FloatingActionButton(
+        onPressed: createNewTask,
+        backgroundColor: const Color(0xFFD4B483),
+        child: const Icon(Icons.add, color: Colors.black),
+      ),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -279,23 +297,6 @@ class _HomepageState extends State<Homepage> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: createNewTask,
-        backgroundColor: const Color(0xFFD4B483),
-        child: const Icon(Icons.add, color: Colors.black),
-      ),
-    );
-  }
-
-  Widget _buildHeaderIcon(IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Icon(icon, color: Colors.white, size: 20),
     );
   }
 

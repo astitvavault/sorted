@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:todo_app/data/database.dart';
+import 'package:todo_app/models/note.dart';
+import 'package:todo_app/services/note_service.dart';
 
 class NotesPage extends StatefulWidget {
   const NotesPage({super.key});
@@ -13,11 +14,22 @@ class _NotesPageState extends State<NotesPage> {
   ToDoDatabase db = ToDoDatabase();
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
+  final NoteService _noteService = NoteService();
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    db.loadData();
+    _loadNotes();
+  }
+
+  Future<void> _loadNotes() async {
+    await db.loadData();
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   void _addNote() {
@@ -36,10 +48,14 @@ class _NotesPageState extends State<NotesPage> {
     );
   }
 
-  void _deleteNote(int index) {
+  void _deleteNote(int index) async {
+    int? id = db.notesList[index].length > 3 ? db.notesList[index][3] : null;
     setState(() {
       db.notesList.removeAt(index);
     });
+    if (id != null) {
+      await _noteService.deleteNote(id);
+    }
     db.updateData();
   }
 
@@ -93,26 +109,37 @@ class _NotesPageState extends State<NotesPage> {
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        if (index == null) {
-                          db.notesList.insert(0, [
-                            _titleController.text,
-                            _contentController.text,
-                            DateFormat.yMMMd().format(DateTime.now())
-                          ]);
-                        } else {
-                          db.notesList[index] = [
-                            _titleController.text,
-                            _contentController.text,
-                            DateFormat.yMMMd().format(DateTime.now())
-                          ];
-                        }
-                      });
+                    onPressed: () async {
+                      String title = _titleController.text;
+                      String content = _contentController.text;
+
+                      int? profileId = db.profileData["id"];
+                      if (profileId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No active profile")));
+                        return;
+                      }
+
+                      if (index == null) {
+                        Note newNote = Note(title: title, content: content, profileId: profileId);
+                        Note created = await _noteService.createNote(newNote);
+                        setState(() {
+                          db.notesList.insert(0, [created.title, created.content, "", created.id]);
+                        });
+                      } else {
+                        int id = db.notesList[index][3];
+                        Note updatedNote = Note(id: id, title: title, content: content, profileId: profileId);
+                        await _noteService.updateNote(id, updatedNote);
+                        setState(() {
+                          db.notesList[index] = [title, content, "", id];
+                        });
+                      }
+                      
                       db.updateData();
                       _titleController.clear();
                       _contentController.clear();
-                      Navigator.pop(context);
+                      if (mounted) {
+                        Navigator.pop(context);
+                      }
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFD4B483),
@@ -151,6 +178,13 @@ class _NotesPageState extends State<NotesPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF121212),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFD4B483))),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
       appBar: AppBar(

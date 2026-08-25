@@ -18,14 +18,31 @@ class HomeContent extends StatefulWidget {
 class _HomeContentState extends State<HomeContent> {
   ToDoDatabase db = ToDoDatabase();
 
+  bool _isLoading = true;
+
   @override
   void initState() {
     super.initState();
-    db.loadData();
+    _refreshData();
+  }
+
+  Future<void> _refreshData() async {
+    await db.loadData();
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF121212),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFD4B483))),
+      );
+    }
     String formattedDate = DateFormat('EEEE, d MMMM').format(DateTime.now());
     
     final List<String> gogginsQuotes = [
@@ -144,7 +161,7 @@ class _HomeContentState extends State<HomeContent> {
                     _buildCategoryItem(
                       Icons.check_box_outlined, 
                       "To-do",
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => Homepage())).then((_) => setState(() {db.loadData();})),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => Homepage())).then((_) => _refreshData()),
                     ),
                     _buildCategoryItem(
                       Icons.trending_up, 
@@ -154,7 +171,7 @@ class _HomeContentState extends State<HomeContent> {
                     _buildCategoryItem(
                       Icons.edit_note, 
                       "Notes",
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => NotesPage())).then((_) => setState(() {db.loadData();})),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => NotesPage())).then((_) => _refreshData()),
                     ),
                   ],
                 ),
