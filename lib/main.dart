@@ -2,10 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/adapters.dart';
 import 'package:todo_app/pages/splash_page.dart';
 import 'package:todo_app/pages/login_page.dart';
+import 'package:todo_app/services/notification_service.dart';
 
-void main() async {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
   await Hive.initFlutter();
   await Hive.openBox("MyBox");
+
+  // Initialize notification service
+  await NotificationService().initialize();
+
   runApp(const MyApp());
 }
 

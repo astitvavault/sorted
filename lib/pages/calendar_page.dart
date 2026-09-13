@@ -5,6 +5,7 @@ import 'package:todo_app/models/meeting.dart';
 import 'package:todo_app/models/reminder.dart';
 import 'package:todo_app/services/meeting_service.dart';
 import 'package:todo_app/services/reminder_service.dart';
+import 'package:todo_app/services/notification_service.dart';
 import 'package:intl/intl.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -105,15 +106,61 @@ class _CalendarPageState extends State<CalendarPage> {
 
     if (_reminderController.text.isNotEmpty) {
       String text = _reminderController.text;
-      String date = DateFormat('yyyy-MM-ddTHH:mm:ss').format(_selectedDay!);
+      
+      // Show TimePicker to select exact notification time
+      TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.now(),
+      );
+
+      if (pickedTime == null) return;
+
+      DateTime scheduledDateTime = DateTime(
+        _selectedDay!.year,
+        _selectedDay!.month,
+        _selectedDay!.day,
+        pickedTime.hour,
+        pickedTime.minute,
+      );
+
+      String dateIso = scheduledDateTime.toIso8601String();
       _reminderController.clear();
 
       Reminder newReminder = Reminder(
         title: text, 
-        reminderTime: date,
+        reminderTime: dateIso,
         profileId: profileId,
       );
-      await _reminderService.createReminder(newReminder);
+      
+      try {
+        Reminder created = await _reminderService.createReminder(newReminder);
+        
+        // Schedule local notification
+        if (created.id != null) {
+          await NotificationService().scheduleReminder(
+            id: created.id!,
+            title: 'Reminder: Sorted',
+            body: text,
+            scheduledTime: scheduledDateTime,
+          );
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text("Reminder set for ${DateFormat.jm().format(scheduledDateTime)}"),
+                backgroundColor: const Color(0xFFD4B483),
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Failed to set reminder: $e")),
+          );
+        }
+      }
+      
       _refreshData();
     }
   }
@@ -143,6 +190,34 @@ class _CalendarPageState extends State<CalendarPage> {
           style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: () async {
+              // 1. Immediate Test
+              await NotificationService().showImmediateNotification(
+                id: 998,
+                title: "Immediate Test",
+                body: "This should appear NOW.",
+              );
+              
+              // 2. Scheduled Test (5 seconds from now)
+              DateTime testTime = DateTime.now().add(const Duration(seconds: 5));
+              await NotificationService().scheduleReminder(
+                id: 999,
+                title: "Foreground Test",
+                body: "This should appear in 5 seconds.",
+                scheduledTime: testTime,
+              );
+              
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Sent immediate & scheduled test (+5s)")),
+                );
+              }
+            },
+            icon: const Icon(Icons.notifications_active, color: Color(0xFFD4B483)),
+          )
+        ],
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -221,7 +296,20 @@ class _CalendarPageState extends State<CalendarPage> {
 
                   // Custom Reminder Section
                   _buildSectionTitle("Reminders"),
-                  ...(_currentDayData["reminders"] as List).map((r) => _buildItemTile(r['text'] ?? r['title'] ?? '', Icons.notification_important, id: r['id'], type: 'reminder')),
+                  ...(_currentDayData["reminders"] as List).map((r) {
+                    String timeStr = "";
+                    if (r['reminderTime'] != null) {
+                      DateTime dt = DateTime.parse(r['reminderTime']);
+                      timeStr = DateFormat.jm().format(dt);
+                    }
+                    return _buildItemTile(
+                      r['text'] ?? r['title'] ?? '', 
+                      Icons.notification_important, 
+                      id: r['id'], 
+                      type: 'reminder',
+                      subtitle: timeStr,
+                    );
+                  }),
                   _buildInputRow(_reminderController, "Set a reminder...", _addReminder),
                   
                   const Divider(color: Colors.white10, height: 40),
@@ -373,7 +461,7 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  Widget _buildItemTile(String text, IconData icon, {int? id, required String type}) {
+  Widget _buildItemTile(String text, IconData icon, {int? id, required String type, String subtitle = ""}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -386,13 +474,21 @@ class _CalendarPageState extends State<CalendarPage> {
           Icon(icon, color: const Color(0xFFD4B483), size: 20),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(text, style: const TextStyle(color: Colors.white70)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(text, style: const TextStyle(color: Colors.white70)),
+                if (subtitle.isNotEmpty)
+                  Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 11)),
+              ],
+            ),
           ),
           GestureDetector(
             onTap: () async {
               if (id != null) {
                 if (type == 'reminder') {
                   await _reminderService.deleteReminder(id);
+                  await NotificationService().cancelReminder(id);
                 }
                 _refreshData();
               }
