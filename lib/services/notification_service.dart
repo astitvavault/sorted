@@ -1,4 +1,4 @@
-import 'dart:ui';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -15,36 +15,55 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
+  static const String _channelId = 'reminders_channel_v3';
+  static const String _channelName = 'Reminders';
+  static const String _channelDesc = 'Scheduled task reminders';
+
   Future<void> initialize() async {
     try {
       tz.initializeTimeZones();
       final String timeZoneName = await FlutterTimezone.getLocalTimezone();
-      // Lock to the detected timezone
-      tz.setLocalLocation(tz.getLocation(timeZoneName));
-      print("NotificationService: Timezone locked to $timeZoneName");
+      try {
+        tz.setLocalLocation(tz.getLocation(timeZoneName));
+        debugPrint("NotificationService: Timezone locked to $timeZoneName");
+      } catch (e) {
+        debugPrint("NotificationService: Specific timezone lookup failed ($e), searching fallback...");
+        final offset = DateTime.now().timeZoneOffset;
+        final matchingLocation = tz.timeZoneDatabase.locations.values.firstWhere(
+          (loc) => loc.currentTimeZone.offset == offset.inMilliseconds,
+          orElse: () => tz.getLocation('UTC'),
+        );
+        tz.setLocalLocation(matchingLocation);
+        debugPrint("NotificationService: Fallback timezone locked to ${matchingLocation.name}");
+      }
     } catch (e) {
-      print("NotificationService: Timezone error: $e");
-      // Fallback to UTC if detection fails (rare)
+      debugPrint("NotificationService: Timezone error: $e");
     }
 
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
+    const iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
 
     const initializationSettings = InitializationSettings(
       android: androidSettings,
+      iOS: iosSettings,
     );
 
     await _notifications.initialize(
       initializationSettings,
       onDidReceiveNotificationResponse: (details) {
-        print("NotificationService: Tapped ID ${details.payload}");
+        debugPrint("NotificationService: Tapped notification payload: ${details.payload}");
       },
     );
 
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'reminders_channel_v3', // Incremented version to clear previous issues
-      'Reminders',
-      description: 'Scheduled task reminders',
+      _channelId,
+      _channelName,
+      description: _channelDesc,
       importance: Importance.max,
       playSound: true,
       enableVibration: true,
@@ -68,31 +87,52 @@ class NotificationService {
     required DateTime scheduledTime,
   }) async {
     try {
-      // 1. Direct conversion from local DateTime to Timezone DateTime
-      var scheduledDate = tz.TZDateTime.from(scheduledTime, tz.local);
+      // 1. Construct TZDateTime using tz.local components to avoid any offset issues
+      var scheduledDate = tz.TZDateTime(
+        tz.local,
+        scheduledTime.year,
+        scheduledTime.month,
+        scheduledTime.day,
+        scheduledTime.hour,
+        scheduledTime.minute,
+        scheduledTime.second,
+      );
       final now = tz.TZDateTime.now(tz.local);
 
-      print("NotificationService: Scheduling...");
-      print("NotificationService: Current Time: $now");
-      print("NotificationService: Target Time: $scheduledDate");
+      debugPrint("NotificationService: Scheduling reminder ID $id");
+      debugPrint("NotificationService: Current Time: $now");
+      debugPrint("NotificationService: Target Time: $scheduledDate");
 
-      // 2. Safety Buffer: If the time is in the past or within 10 seconds, 
-      // push it forward to 15 seconds from now.
-      if (scheduledDate.isBefore(now.add(const Duration(seconds: 10)))) {
-        scheduledDate = now.add(const Duration(seconds: 15));
-        print("NotificationService: Time too close/past. Pushed to: $scheduledDate");
+      // 2. Past-time check
+      if (scheduledDate.isBefore(now)) {
+        // If it was scheduled for right now / a few seconds ago due to picker delay, push slightly ahead
+        if (now.difference(scheduledDate).inSeconds <= 30) {
+          scheduledDate = now.add(const Duration(seconds: 2));
+          debugPrint("NotificationService: Scheduled time just elapsed, adjusted to: $scheduledDate");
+        } else {
+          debugPrint("NotificationService: Target time $scheduledDate is in the past compared to $now, skipping schedule.");
+          return;
+        }
       }
 
       final androidImplementation = _notifications
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
       
-      bool canScheduleExact = false;
+      bool canScheduleExact = true;
       if (androidImplementation != null) {
-        canScheduleExact = await androidImplementation.canScheduleExactNotifications() ?? false;
+        canScheduleExact = await androidImplementation.canScheduleExactNotifications() ?? true;
+        if (!canScheduleExact) {
+          await androidImplementation.requestExactAlarmsPermission();
+          canScheduleExact = await androidImplementation.canScheduleExactNotifications() ?? true;
+        }
       }
 
-      // 3. Perform the schedule
+      final AndroidScheduleMode scheduleMode = canScheduleExact
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle;
+
+      // 3. Perform zoned schedule
       await _notifications.zonedSchedule(
         id,
         title,
@@ -100,24 +140,29 @@ class NotificationService {
         scheduledDate,
         const NotificationDetails(
           android: AndroidNotificationDetails(
-            'reminders_channel_v3',
-            'Reminders',
-            channelDescription: 'Scheduled task reminders',
+            _channelId,
+            _channelName,
+            channelDescription: _channelDesc,
             importance: Importance.max,
             priority: Priority.max,
             ticker: 'ticker',
             color: Color(0xFFD4B483),
-            // Removed fullScreenIntent and category to match showImmediateNotification more closely
             visibility: NotificationVisibility.public,
+            playSound: true,
+            enableVibration: true,
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
           ),
         ),
-        // Try inexact mode first as it is more likely to be permitted by the OS without extra user intervention
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        androidScheduleMode: scheduleMode,
         payload: id.toString(),
       );
-      print("NotificationService: SCHEDULE SUCCESS for ID $id");
+      debugPrint("NotificationService: SCHEDULE SUCCESS for ID $id at $scheduledDate (mode: $scheduleMode)");
     } catch (e) {
-      print("NotificationService: SCHEDULE FAILED - $e");
+      debugPrint("NotificationService: SCHEDULE FAILED - $e");
     }
   }
 
@@ -132,10 +177,18 @@ class NotificationService {
   }) async {
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
-        'reminders_channel_v3',
-        'Reminders',
+        _channelId,
+        _channelName,
+        channelDescription: _channelDesc,
         importance: Importance.max,
-        priority: Priority.high,
+        priority: Priority.max,
+        playSound: true,
+        enableVibration: true,
+      ),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
       ),
     );
     await _notifications.show(id, title, body, details);

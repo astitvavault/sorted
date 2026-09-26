@@ -199,6 +199,56 @@ class ToDoDatabase {
     }
   }
 
+  Future<int> addReminder(Reminder reminder, {DateTime? date}) async {
+    int generatedId = DateTime.now().millisecondsSinceEpoch % 2147483647;
+    int? profileId = profileData["id"];
+
+    // 1. Try to sync to backend if available
+    if (profileId != null) {
+      try {
+        Reminder created = await _reminderService.createReminder(reminder);
+        if (created.id != null) {
+          generatedId = created.id!;
+        }
+        await loadData();
+        return generatedId;
+      } catch (e) {
+        print("Backend sync failed for reminder, falling back to local storage: $e");
+      }
+    }
+
+    // 2. Offline / local fallback: store in calendarData and Hive
+    String dateKey = reminder.reminderTime != null && reminder.reminderTime!.length >= 10
+        ? reminder.reminderTime!.substring(0, 10)
+        : _getDateKey(date ?? DateTime.now());
+
+    calendarData[dateKey] ??= {"tasks": [], "meetings": [], "reminders": []};
+    calendarData[dateKey]["reminders"].add({
+      "text": reminder.title,
+      "id": generatedId,
+      "reminderTime": reminder.reminderTime,
+      "triggered": reminder.triggered,
+    });
+    await updateData();
+    return generatedId;
+  }
+
+  Future<void> deleteReminder(int? id, {DateTime? date}) async {
+    if (id == null) return;
+    try {
+      await _reminderService.deleteReminder(id);
+      await loadData();
+    } catch (e) {
+      print("Failed to delete reminder from API, removing locally: $e");
+      calendarData.forEach((key, val) {
+        if (val is Map && val["reminders"] is List) {
+          (val["reminders"] as List).removeWhere((r) => r["id"] == id);
+        }
+      });
+      await updateData();
+    }
+  }
+
   Map<String, dynamic> getDataForDate(DateTime date) {
     String key = _getDateKey(date);
     if (calendarData.containsKey(key)) {

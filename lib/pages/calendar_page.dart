@@ -101,11 +101,10 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void _addReminder() async {
-    int? profileId = db.profileData["id"];
-    if (profileId == null) return;
+    int profileId = db.profileData["id"] ?? 1;
 
-    if (_reminderController.text.isNotEmpty) {
-      String text = _reminderController.text;
+    if (_reminderController.text.trim().isNotEmpty) {
+      String text = _reminderController.text.trim();
       
       // Show TimePicker to select exact notification time
       TimeOfDay? pickedTime = await showTimePicker(
@@ -115,13 +114,26 @@ class _CalendarPageState extends State<CalendarPage> {
 
       if (pickedTime == null) return;
 
+      final targetDate = _selectedDay ?? _focusedDay;
       DateTime scheduledDateTime = DateTime(
-        _selectedDay!.year,
-        _selectedDay!.month,
-        _selectedDay!.day,
+        targetDate.year,
+        targetDate.month,
+        targetDate.day,
         pickedTime.hour,
         pickedTime.minute,
       );
+
+      if (scheduledDateTime.isBefore(DateTime.now())) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Cannot schedule a reminder in the past. Please choose a future time."),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+        return;
+      }
 
       String dateIso = scheduledDateTime.toIso8601String();
       _reminderController.clear();
@@ -133,25 +145,23 @@ class _CalendarPageState extends State<CalendarPage> {
       );
       
       try {
-        Reminder created = await _reminderService.createReminder(newReminder);
+        int reminderId = await db.addReminder(newReminder, date: targetDate);
         
         // Schedule local notification
-        if (created.id != null) {
-          await NotificationService().scheduleReminder(
-            id: created.id!,
-            title: 'Reminder: Sorted',
-            body: text,
-            scheduledTime: scheduledDateTime,
+        await NotificationService().scheduleReminder(
+          id: reminderId,
+          title: 'Reminder: Sorted',
+          body: text,
+          scheduledTime: scheduledDateTime,
+        );
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Reminder set for ${DateFormat.jm().format(scheduledDateTime)}"),
+              backgroundColor: const Color(0xFFD4B483),
+            ),
           );
-          
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text("Reminder set for ${DateFormat.jm().format(scheduledDateTime)}"),
-                backgroundColor: const Color(0xFFD4B483),
-              ),
-            );
-          }
         }
       } catch (e) {
         if (mounted) {
@@ -487,7 +497,7 @@ class _CalendarPageState extends State<CalendarPage> {
             onTap: () async {
               if (id != null) {
                 if (type == 'reminder') {
-                  await _reminderService.deleteReminder(id);
+                  await db.deleteReminder(id);
                   await NotificationService().cancelReminder(id);
                 }
                 _refreshData();
