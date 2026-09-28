@@ -76,18 +76,31 @@ class _LoginPageState extends State<LoginPage> {
     try {
       Profile newProfile = Profile(
         fullName: _nameController.text,
-        bio: _bioController.text,
+        bio: _bioController.text.isNotEmpty ? _bioController.text : null,
         birthDate: DateFormat('yyyy-MM-dd').format(_selectedDate!),
-        profileImage: _image?.path, // Backend might expect a URL, but we'll send local path for now
       );
 
       // Create on backend
-      Profile createdProfile = await _profileService.createProfile(newProfile);
+      Profile createdProfile;
+      try {
+        createdProfile = await _profileService.createProfile(newProfile);
+      } catch (apiError) {
+        print("Backend createProfile error: $apiError");
+        // Offline / cold-start fallback
+        createdProfile = newProfile.copyWith(
+          id: DateTime.now().millisecondsSinceEpoch % 2147483647,
+        );
+      }
 
       // Save returned ID and metadata locally
       db.profileData = createdProfile.toJson();
+      db.profileData["fullName"] = _nameController.text;
+      db.profileData["name"] = _nameController.text;
+      if (_image != null) {
+        db.profileData["imagePath"] = _image!.path;
+      }
       db.profileData["isRegistered"] = true;
-      db.updateData();
+      await db.updateData();
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -202,7 +215,7 @@ class _LoginPageState extends State<LoginPage> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E1E1E),
                     borderRadius: BorderRadius.circular(15),
-                    border: Border.all(color: Colors.white.withOpacity(0.05)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,

@@ -4,7 +4,6 @@ import 'package:todo_app/data/database.dart';
 import 'package:todo_app/models/meeting.dart';
 import 'package:todo_app/models/reminder.dart';
 import 'package:todo_app/services/meeting_service.dart';
-import 'package:todo_app/services/reminder_service.dart';
 import 'package:todo_app/services/notification_service.dart';
 import 'package:intl/intl.dart';
 
@@ -17,7 +16,6 @@ class CalendarPage extends StatefulWidget {
 
 class _CalendarPageState extends State<CalendarPage> {
   ToDoDatabase db = ToDoDatabase();
-  final ReminderService _reminderService = ReminderService();
   final MeetingService _meetingService = MeetingService();
 
   DateTime _focusedDay = DateTime.now();
@@ -53,7 +51,6 @@ class _CalendarPageState extends State<CalendarPage> {
   void _loadDayData(DateTime date) {
     setState(() {
       _currentDayData = db.getDataForDate(date);
-      // Migration/Safety: ensure lists exist
       _currentDayData["tasks"] ??= [];
       _currentDayData["meetings"] ??= [];
       _currentDayData["reminders"] ??= [];
@@ -62,8 +59,8 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void _addTask() async {
-    if (_taskController.text.isNotEmpty) {
-      String title = _taskController.text;
+    if (_taskController.text.trim().isNotEmpty) {
+      String title = _taskController.text.trim();
       _taskController.clear();
       await db.addTask([
         title, 
@@ -78,25 +75,51 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void _addMeeting() async {
-    int? profileId = db.profileData["id"];
-    if (profileId == null) return;
-
-    if (_meetingTitleController.text.isNotEmpty) {
-      String title = _meetingTitleController.text;
-      String link = _meetingLinkController.text;
-      String date = DateFormat('yyyy-MM-ddTHH:mm:ss').format(_selectedDay!);
-      
+    if (_meetingTitleController.text.trim().isNotEmpty) {
+      String title = _meetingTitleController.text.trim();
+      String link = _meetingLinkController.text.trim();
       _meetingTitleController.clear();
       _meetingLinkController.clear();
 
-      Meeting newMeeting = Meeting(
-        title: title, 
-        location: link, 
-        meetingTime: date,
-        profileId: profileId,
-      );
-      await _meetingService.createMeeting(newMeeting);
-      _refreshData();
+      final targetDate = _selectedDay ?? _focusedDay;
+      String dateIso = DateFormat('yyyy-MM-ddTHH:mm:ss').format(targetDate);
+      String dateKey = DateFormat('yyyy-MM-dd').format(targetDate);
+      int localId = DateTime.now().millisecondsSinceEpoch % 2147483647;
+
+      var newMeetingMap = {
+        "title": title,
+        "link": link,
+        "id": localId,
+        "meetingTime": dateIso,
+      };
+
+      setState(() {
+        db.calendarData[dateKey] ??= {"tasks": [], "meetings": [], "reminders": []};
+        (db.calendarData[dateKey]["meetings"] as List).add(newMeetingMap);
+      });
+      await db.updateData();
+
+      int? profileId = db.profileData["id"];
+      if (profileId != null) {
+        try {
+          Meeting newMeeting = Meeting(
+            title: title, 
+            location: link, 
+            meetingTime: dateIso,
+            profileId: profileId,
+          );
+          Meeting created = await _meetingService.createMeeting(newMeeting);
+          final createdId = created.id;
+          if (createdId != null) {
+            newMeetingMap["id"] = createdId;
+            await db.updateData();
+          }
+        } catch (e) {
+          print("Backend meeting sync failed (saved locally): $e");
+        }
+      }
+
+      _loadDayData(targetDate);
     }
   }
 
@@ -106,7 +129,6 @@ class _CalendarPageState extends State<CalendarPage> {
     if (_reminderController.text.trim().isNotEmpty) {
       String text = _reminderController.text.trim();
       
-      // Show TimePicker to select exact notification time
       TimeOfDay? pickedTime = await showTimePicker(
         context: context,
         initialTime: TimeOfDay.now(),
@@ -200,34 +222,6 @@ class _CalendarPageState extends State<CalendarPage> {
           style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
-        actions: [
-          IconButton(
-            onPressed: () async {
-              // 1. Immediate Test
-              await NotificationService().showImmediateNotification(
-                id: 998,
-                title: "Immediate Test",
-                body: "This should appear NOW.",
-              );
-              
-              // 2. Scheduled Test (5 seconds from now)
-              DateTime testTime = DateTime.now().add(const Duration(seconds: 5));
-              await NotificationService().scheduleReminder(
-                id: 999,
-                title: "Foreground Test",
-                body: "This should appear in 5 seconds.",
-                scheduledTime: testTime,
-              );
-              
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Sent immediate & scheduled test (+5s)")),
-                );
-              }
-            },
-            icon: const Icon(Icons.notifications_active, color: Color(0xFFD4B483)),
-          )
-        ],
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -304,7 +298,7 @@ class _CalendarPageState extends State<CalendarPage> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Custom Reminder Section
+                  // Reminders Section
                   _buildSectionTitle("Reminders"),
                   ...(_currentDayData["reminders"] as List).map((r) {
                     String timeStr = "";
@@ -338,7 +332,7 @@ class _CalendarPageState extends State<CalendarPage> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
+                      color: Colors.white.withValues(alpha: 0.05),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(
@@ -407,7 +401,7 @@ class _CalendarPageState extends State<CalendarPage> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -476,7 +470,7 @@ class _CalendarPageState extends State<CalendarPage> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
@@ -489,7 +483,7 @@ class _CalendarPageState extends State<CalendarPage> {
               children: [
                 Text(text, style: const TextStyle(color: Colors.white70)),
                 if (subtitle.isNotEmpty)
-                  Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 11)),
+                  Text(subtitle, style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 11)),
               ],
             ),
           ),
@@ -519,7 +513,7 @@ class _CalendarPageState extends State<CalendarPage> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
@@ -539,7 +533,11 @@ class _CalendarPageState extends State<CalendarPage> {
           GestureDetector(
             onTap: () async {
               if (id != null) {
-                await _meetingService.deleteMeeting(id);
+                try {
+                  await _meetingService.deleteMeeting(id);
+                } catch (e) {
+                  print("Failed to delete meeting from backend: $e");
+                }
                 _refreshData();
               }
             },

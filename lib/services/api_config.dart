@@ -1,3 +1,3 @@
 class ApiConfig {
-  static const String baseUrl = "http://10.0.2.2:8080/api"; // Android emulator
+  static const String baseUrl = "https://sorted-backend-1ry0.onrender.com/api";
 }

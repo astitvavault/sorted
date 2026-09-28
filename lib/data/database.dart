@@ -29,173 +29,276 @@ class ToDoDatabase {
     return DateFormat('yyyy-MM-dd').format(date);
   }
 
-  // Load from API based on the active profile ID
+  // Load from local Hive first, then attempt backend sync
   Future<void> loadData() async {
+    // 1. Always load local Hive data immediately for zero latency
+    profileData = Map<dynamic, dynamic>.from(_MyBox.get("PROFILEDATA") ?? {});
+    toDoList = List.from(_MyBox.get("TODOLIST") ?? []);
+    calendarData = Map<dynamic, dynamic>.from(_MyBox.get("CALENDARDATA") ?? {});
+    notesList = List.from(_MyBox.get("NOTESLIST") ?? []);
+
+    int? profileId = profileData["id"];
+    bool isLocalFallbackId = profileId != null && profileId > 100000000;
+
+    // 2. Try fetching remote profile or self-healing fallback ID
+    if (profileId != null && !isLocalFallbackId) {
+      try {
+        Profile remoteProfile = await _profileService.getProfileById(profileId);
+        profileData = Map<dynamic, dynamic>.from(remoteProfile.toJson());
+        profileData["isRegistered"] = true;
+        await _MyBox.put("PROFILEDATA", profileData);
+      } catch (e) {
+        print("Could not fetch remote profile $profileId: $e");
+        if (e.toString().contains("404")) {
+          isLocalFallbackId = true; // Mark to create on backend
+        }
+      }
+    }
+
+    // Auto-register profile on backend if profileId is missing, is a local fallback ID, or returned 404
+    if ((profileId == null || isLocalFallbackId) && (profileData["fullName"] != null || profileData["name"] != null)) {
+      try {
+        String nameStr = profileData["fullName"] ?? profileData["name"] ?? "User";
+        Profile newProfile = Profile(
+          fullName: nameStr,
+          bio: profileData["bio"],
+          birthDate: profileData["birthDate"],
+        );
+        Profile created = await _profileService.createProfile(newProfile);
+        final createdId = created.id;
+        if (createdId != null) {
+          profileId = createdId;
+          profileData["id"] = createdId;
+          profileData["isRegistered"] = true;
+          await _MyBox.put("PROFILEDATA", profileData);
+          print("Successfully auto-registered profile on backend with real ID: $profileId");
+        }
+      } catch (e) {
+        print("Profile auto-registration on backend failed: $e");
+      }
+    }
+
+    if (profileId == null) return;
+
     try {
-      // 1. Get active profile info from Hive
-      profileData = _MyBox.get("PROFILEDATA") ?? {};
-      int? profileId = profileData["id"];
-
-      if (profileId == null) {
-        // No profile registered yet, use local Hive if any
-        toDoList = _MyBox.get("TODOLIST") ?? [];
-        calendarData = _MyBox.get("CALENDARDATA") ?? {};
-        notesList = _MyBox.get("NOTESLIST") ?? [];
-        return;
-      }
-
-      // 2. Fetch Profile from Backend to stay in sync
-      Profile remoteProfile = await _profileService.getProfileById(profileId);
-      profileData = remoteProfile.toJson();
-      profileData["isRegistered"] = true; // Keep local flag
-      _MyBox.put("PROFILEDATA", profileData);
-
       // 3. Fetch Todos for this profile
-      List<Todo> apiTodos = await _todoService.getTodosByProfile(profileId);
-      
-      // Filter for today's tasks to populate toDoList
-      String todayKey = _getDateKey(DateTime.now());
-      toDoList = apiTodos
-          .where((t) => t.dueDate == todayKey)
-          .map((t) => [
-                t.title,
-                t.completed,
-                false, // high priority placeholder
-                0, // timer placeholder
-                t.description ?? '',
-                "", // task time placeholder
-                t.id,
-              ])
-          .toList();
+      try {
+        List<Todo> apiTodos = await _todoService.getTodosByProfile(profileId);
+        String todayKey = _getDateKey(DateTime.now());
+        
+        List remoteTodayList = apiTodos
+            .where((t) => t.dueDate == todayKey)
+            .map((t) => [
+                  t.title,
+                  t.completed,
+                  false, // high priority placeholder
+                  0, // timer placeholder
+                  t.description ?? '',
+                  "", // task time placeholder
+                  t.id,
+                ])
+            .toList();
 
-      // 4. Load Notes
-      List<Note> apiNotes = await _noteService.getNotesByProfile(profileId);
-      notesList = apiNotes.map((n) => [
-        n.title,
-        n.content ?? '',
-        "", // date placeholder
-        n.id,
-      ]).toList();
+        if (remoteTodayList.isNotEmpty) {
+          toDoList = remoteTodayList;
+        }
 
-      // 5. Sync Calendar Data
-      calendarData = {};
-      
-      // Add all todos to calendar
-      for (var t in apiTodos) {
-        if (t.dueDate != null) {
-          calendarData[t.dueDate] ??= {"tasks": [], "meetings": [], "reminders": []};
-          calendarData[t.dueDate]["tasks"].add([
-            t.title,
-            t.completed,
-            false,
-            0,
-            t.description ?? '',
+        // Merge/update calendar data
+        for (var t in apiTodos) {
+          if (t.dueDate != null) {
+            calendarData[t.dueDate] ??= {"tasks": [], "meetings": [], "reminders": []};
+            List tasksForDate = List.from(calendarData[t.dueDate]["tasks"] ?? []);
+            
+            int existingIndex = tasksForDate.indexWhere((item) => item.length > 6 && item[6] == t.id);
+            var taskItem = [
+              t.title,
+              t.completed,
+              false,
+              0,
+              t.description ?? '',
+              "",
+              t.id,
+            ];
+
+            if (existingIndex >= 0) {
+              tasksForDate[existingIndex] = taskItem;
+            } else {
+              tasksForDate.add(taskItem);
+            }
+            calendarData[t.dueDate]["tasks"] = tasksForDate;
+          }
+        }
+      } catch (e) {
+        print("Error fetching remote todos: $e");
+      }
+
+      // 4. Fetch Notes
+      try {
+        List<Note> apiNotes = await _noteService.getNotesByProfile(profileId);
+        if (apiNotes.isNotEmpty) {
+          notesList = apiNotes.map((n) => [
+            n.title,
+            n.content ?? '',
             "",
-            t.id,
-          ]);
+            n.id,
+          ]).toList();
         }
+      } catch (e) {
+        print("Error fetching remote notes: $e");
       }
 
-      // Fetch and add meetings
-      List<Meeting> apiMeetings = await _meetingService.getMeetingsByProfile(profileId);
-      for (var m in apiMeetings) {
-        if (m.meetingTime != null) {
-          String dateKey = m.meetingTime!.substring(0, 10);
-          calendarData[dateKey] ??= {"tasks": [], "meetings": [], "reminders": []};
-          calendarData[dateKey]["meetings"].add({
-            "title": m.title,
-            "link": m.location ?? '',
-            "id": m.id,
-            "agenda": m.agenda,
-            "meetingTime": m.meetingTime,
-            "participants": m.participants,
-          });
+      // 5. Fetch Meetings
+      try {
+        List<Meeting> apiMeetings = await _meetingService.getMeetingsByProfile(profileId);
+        for (var m in apiMeetings) {
+          if (m.meetingTime != null) {
+            String dateKey = m.meetingTime!.substring(0, 10);
+            calendarData[dateKey] ??= {"tasks": [], "meetings": [], "reminders": []};
+            List meetingsList = List.from(calendarData[dateKey]["meetings"] ?? []);
+            int existingIndex = meetingsList.indexWhere((item) => item['id'] == m.id);
+            var mItem = {
+              "title": m.title,
+              "link": m.location ?? '',
+              "id": m.id,
+              "agenda": m.agenda,
+              "meetingTime": m.meetingTime,
+              "participants": m.participants,
+            };
+            if (existingIndex >= 0) {
+              meetingsList[existingIndex] = mItem;
+            } else {
+              meetingsList.add(mItem);
+            }
+            calendarData[dateKey]["meetings"] = meetingsList;
+          }
         }
+      } catch (e) {
+        print("Error fetching remote meetings: $e");
       }
 
-      // Fetch and add reminders
-      List<Reminder> apiReminders = await _reminderService.getRemindersByProfile(profileId);
-      for (var r in apiReminders) {
-        if (r.reminderTime != null) {
-          String dateKey = r.reminderTime!.substring(0, 10);
-          calendarData[dateKey] ??= {"tasks": [], "meetings": [], "reminders": []};
-          calendarData[dateKey]["reminders"].add({
-            "text": r.title,
-            "id": r.id,
-            "reminderTime": r.reminderTime,
-            "triggered": r.triggered,
-          });
+      // 6. Fetch Reminders
+      try {
+        List<Reminder> apiReminders = await _reminderService.getRemindersByProfile(profileId);
+        for (var r in apiReminders) {
+          if (r.reminderTime != null) {
+            String dateKey = r.reminderTime!.substring(0, 10);
+            calendarData[dateKey] ??= {"tasks": [], "meetings": [], "reminders": []};
+            List remindersList = List.from(calendarData[dateKey]["reminders"] ?? []);
+            int existingIndex = remindersList.indexWhere((item) => item['id'] == r.id);
+            var rItem = {
+              "text": r.title,
+              "id": r.id,
+              "reminderTime": r.reminderTime,
+              "triggered": r.triggered,
+            };
+            if (existingIndex >= 0) {
+              remindersList[existingIndex] = rItem;
+            } else {
+              remindersList.add(rItem);
+            }
+            calendarData[dateKey]["reminders"] = remindersList;
+          }
         }
+      } catch (e) {
+        print("Error fetching remote reminders: $e");
       }
 
+      await updateData();
     } catch (e) {
-      print("Error loading data from API: $e");
-      // Fallback to Hive
-      toDoList = _MyBox.get("TODOLIST") ?? [];
-      calendarData = _MyBox.get("CALENDARDATA") ?? {};
-      notesList = _MyBox.get("NOTESLIST") ?? [];
+      print("Global error in loadData: $e");
     }
   }
 
   Future<void> updateData() async {
-    // Mostly keeping Hive as a local cache/backup
-    _MyBox.put("PROFILEDATA", profileData);
-    _MyBox.put("TODOLIST", toDoList);
-    _MyBox.put("CALENDARDATA", calendarData);
-    _MyBox.put("NOTESLIST", notesList);
+    await _MyBox.put("PROFILEDATA", profileData);
+    await _MyBox.put("TODOLIST", toDoList);
+    await _MyBox.put("CALENDARDATA", calendarData);
+    await _MyBox.put("NOTESLIST", notesList);
   }
 
-  // API Interaction methods
+  // API Interaction methods with reliable local fallbacks
   Future<void> addTask(List task, {DateTime? date}) async {
-    int? profileId = profileData["id"];
-    if (profileId == null) return;
-
     DateTime taskDate = date ?? DateTime.now();
-    Todo newTodo = Todo(
-      title: task[0],
-      description: task.length > 4 ? task[4] : '',
-      completed: task[1],
-      dueDate: _getDateKey(taskDate),
-      profileId: profileId,
-    );
+    String dateKey = _getDateKey(taskDate);
+    int generatedId = DateTime.now().millisecondsSinceEpoch % 2147483647;
 
-    try {
-      Todo created = await _todoService.createTodo(newTodo);
-      await loadData(); // Full refresh to ensure consistency
-    } catch (e) {
-      print("Failed to add task: $e");
+    List fullTask = List.from(task);
+    if (fullTask.length <= 6) {
+      while (fullTask.length < 6) {
+        fullTask.add("");
+      }
+      fullTask.add(generatedId);
+    }
+
+    if (dateKey == _getDateKey(DateTime.now())) {
+      toDoList.add(fullTask);
+    }
+    calendarData[dateKey] ??= {"tasks": [], "meetings": [], "reminders": []};
+    calendarData[dateKey]["tasks"].add(fullTask);
+    await updateData();
+
+    int? profileId = profileData["id"];
+    if (profileId != null && profileId < 100000000) {
+      try {
+        Todo newTodo = Todo(
+          title: fullTask[0],
+          description: fullTask.length > 4 ? fullTask[4] : '',
+          completed: fullTask[1] ?? false,
+          dueDate: dateKey,
+          profileId: profileId,
+        );
+        Todo created = await _todoService.createTodo(newTodo);
+        final createdId = created.id;
+        if (createdId != null) {
+          fullTask[6] = createdId;
+          await updateData();
+        }
+      } catch (e) {
+        print("Backend sync failed for addTask (saved locally): $e");
+      }
     }
   }
 
   Future<void> updateTask(List task, {DateTime? date}) async {
-    int? profileId = profileData["id"];
     int? taskId = task.length > 6 ? task[6] : null;
-    if (profileId == null || taskId == null) return;
 
-    Todo updatedTodo = Todo(
-      id: taskId,
-      title: task[0],
-      description: task.length > 4 ? task[4] : '',
-      completed: task[1],
-      dueDate: date != null ? _getDateKey(date) : _getDateKey(DateTime.now()),
-      profileId: profileId,
-    );
+    await updateData();
 
-    try {
-      await _todoService.updateTodo(taskId, updatedTodo);
-      await loadData();
-    } catch (e) {
-      print("Failed to update task: $e");
+    int? profileId = profileData["id"];
+    if (profileId != null && taskId != null && profileId < 100000000 && taskId < 100000000) {
+      try {
+        Todo updatedTodo = Todo(
+          id: taskId,
+          title: task[0],
+          description: task.length > 4 ? task[4] : '',
+          completed: task[1] ?? false,
+          dueDate: date != null ? _getDateKey(date) : _getDateKey(DateTime.now()),
+          profileId: profileId,
+        );
+        await _todoService.updateTodo(taskId, updatedTodo);
+      } catch (e) {
+        print("Backend sync failed for updateTask: $e");
+      }
     }
   }
 
   Future<void> deleteTask(int? id) async {
-    if (id == null) return;
-    try {
-      await _todoService.deleteTodo(id);
-      await loadData();
-    } catch (e) {
-      print("Failed to delete task: $e");
+    toDoList.removeWhere((t) => t.length > 6 && t[6] == id);
+
+    calendarData.forEach((key, val) {
+      if (val is Map && val["tasks"] is List) {
+        (val["tasks"] as List).removeWhere((t) => t.length > 6 && t[6] == id);
+      }
+    });
+
+    await updateData();
+
+    if (id != null && id < 100000000) {
+      try {
+        await _todoService.deleteTodo(id);
+      } catch (e) {
+        print("Backend sync failed for deleteTask: $e");
+      }
     }
   }
 
@@ -203,49 +306,54 @@ class ToDoDatabase {
     int generatedId = DateTime.now().millisecondsSinceEpoch % 2147483647;
     int? profileId = profileData["id"];
 
-    // 1. Try to sync to backend if available
-    if (profileId != null) {
-      try {
-        Reminder created = await _reminderService.createReminder(reminder);
-        if (created.id != null) {
-          generatedId = created.id!;
-        }
-        await loadData();
-        return generatedId;
-      } catch (e) {
-        print("Backend sync failed for reminder, falling back to local storage: $e");
-      }
-    }
-
-    // 2. Offline / local fallback: store in calendarData and Hive
     String dateKey = reminder.reminderTime != null && reminder.reminderTime!.length >= 10
         ? reminder.reminderTime!.substring(0, 10)
         : _getDateKey(date ?? DateTime.now());
 
     calendarData[dateKey] ??= {"tasks": [], "meetings": [], "reminders": []};
-    calendarData[dateKey]["reminders"].add({
+    
+    Map<String, dynamic> localReminder = {
       "text": reminder.title,
       "id": generatedId,
       "reminderTime": reminder.reminderTime,
       "triggered": reminder.triggered,
-    });
+    };
+    calendarData[dateKey]["reminders"].add(localReminder);
     await updateData();
+
+    if (profileId != null && profileId < 100000000) {
+      try {
+        Reminder created = await _reminderService.createReminder(reminder);
+        final createdId = created.id;
+        if (createdId != null) {
+          localReminder["id"] = createdId;
+          generatedId = createdId;
+          await updateData();
+        }
+      } catch (e) {
+        print("Backend sync failed for reminder, saved locally: $e");
+      }
+    }
+
     return generatedId;
   }
 
   Future<void> deleteReminder(int? id, {DateTime? date}) async {
     if (id == null) return;
-    try {
-      await _reminderService.deleteReminder(id);
-      await loadData();
-    } catch (e) {
-      print("Failed to delete reminder from API, removing locally: $e");
-      calendarData.forEach((key, val) {
-        if (val is Map && val["reminders"] is List) {
-          (val["reminders"] as List).removeWhere((r) => r["id"] == id);
-        }
-      });
-      await updateData();
+
+    calendarData.forEach((key, val) {
+      if (val is Map && val["reminders"] is List) {
+        (val["reminders"] as List).removeWhere((r) => r["id"] == id);
+      }
+    });
+    await updateData();
+
+    if (id < 100000000) {
+      try {
+        await _reminderService.deleteReminder(id);
+      } catch (e) {
+        print("Failed to delete reminder from API: $e");
+      }
     }
   }
 
@@ -262,9 +370,8 @@ class ToDoDatabase {
   }
 
   Future<void> saveDataForDate(DateTime date, Map<String, dynamic> data) async {
-    // Usually handled by granular add/update methods now.
     String key = _getDateKey(date);
     calendarData[key] = data;
-    updateData();
+    await updateData();
   }
 }

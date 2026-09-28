@@ -20,12 +20,15 @@ class Note {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        "id": id,
-        "title": title,
-        "content": content,
-        "profileId": profileId,
-      };
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = <String, dynamic>{
+      "title": title,
+    };
+    if (id != null) data['id'] = id;
+    if (content != null) data['content'] = content;
+    if (profileId != null) data['profileId'] = profileId;
+    return data;
+  }
 
   Note copyWith({
     int? id,

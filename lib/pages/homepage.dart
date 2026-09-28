@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:todo_app/data/database.dart';
+import 'package:todo_app/services/notification_service.dart';
 import 'package:todo_app/utilities/dialog_box.dart';
 import 'package:todo_app/utilities/to_do_tile.dart';
 
@@ -35,27 +36,45 @@ class _HomepageState extends State<Homepage> {
 
   void checkBoxChanged(bool? value, int index) async {
     setState(() {
-      db.toDoList[index][1] = !db.toDoList[index][1];
+      db.toDoList[index][1] = !(db.toDoList[index][1] as bool);
       if (db.toDoList[index][1] == true) {
-        db.toDoList[index][3] = 0;
+        db.toDoList[index][3] = 0; // reset timer when completed
       }
     });
-    // Call API to update
     await db.updateTask(db.toDoList[index]);
   }
 
   void saveNewTask(bool isHighPriority, String timerText) async {
+    String title = _titleController.text.trim();
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Task title cannot be empty")),
+      );
+      return;
+    }
+
     int timerInSeconds = 0;
     int? endTime;
 
     if (isHighPriority) {
       int minutes = int.tryParse(timerText) ?? 0;
-      timerInSeconds = minutes * 60;
-      endTime = DateTime.now().millisecondsSinceEpoch + (timerInSeconds * 1000);
+      if (minutes > 0) {
+        timerInSeconds = minutes * 60;
+        DateTime triggerTime = DateTime.now().add(Duration(seconds: timerInSeconds));
+        endTime = triggerTime.millisecondsSinceEpoch;
+
+        // Schedule local notification when high-priority task timer finishes
+        int notifId = DateTime.now().millisecondsSinceEpoch % 2147483647;
+        await NotificationService().scheduleReminder(
+          id: notifId,
+          title: "Timer Done: $title",
+          body: "Time's up for your high-priority task!",
+          scheduledTime: triggerTime,
+        );
+      }
     }
 
-    String title = _titleController.text;
-    String desc = _descController.text;
+    String desc = _descController.text.trim();
     String time = DateFormat.jm().format(DateTime.now());
 
     _titleController.clear();
@@ -70,8 +89,10 @@ class _HomepageState extends State<Homepage> {
       desc,
       time,
     ]);
-    
-    _loadInitialData(); // Refresh list
+
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void editTask(int index) {
@@ -85,19 +106,31 @@ class _HomepageState extends State<Homepage> {
           titleController: _titleController,
           descController: _descController,
           onSave: (isHighPriority, timerText) async {
-            int? endTime;
+            String title = _titleController.text.trim();
+            if (title.isEmpty) return;
 
+            int? endTime;
             if (isHighPriority) {
               int minutes = int.tryParse(timerText) ?? 0;
-              int timerInSeconds = minutes * 60;
-              endTime = DateTime.now().millisecondsSinceEpoch + (timerInSeconds * 1000);
+              if (minutes > 0) {
+                DateTime triggerTime = DateTime.now().add(Duration(minutes: minutes));
+                endTime = triggerTime.millisecondsSinceEpoch;
+
+                int notifId = DateTime.now().millisecondsSinceEpoch % 2147483647;
+                await NotificationService().scheduleReminder(
+                  id: notifId,
+                  title: "Timer Done: $title",
+                  body: "Time's up for your high-priority task!",
+                  scheduledTime: triggerTime,
+                );
+              }
             }
 
             setState(() {
-              db.toDoList[index][0] = _titleController.text;
+              db.toDoList[index][0] = title;
               db.toDoList[index][2] = isHighPriority;
               db.toDoList[index][3] = endTime ?? 0;
-              db.toDoList[index][4] = _descController.text;
+              db.toDoList[index][4] = _descController.text.trim();
             });
             
             _titleController.clear();
@@ -120,17 +153,17 @@ class _HomepageState extends State<Homepage> {
     _titleController.clear();
     _descController.clear();
     showDialog(
-        context: context,
-        builder: (context) {
-          return DialogBox(
-            titleController: _titleController,
-            descController: _descController,
-            onSave: (isHighPriority, timerText) {
-              saveNewTask(isHighPriority, timerText);
-            },
-            onCancel: () => Navigator.of(context).pop(),
-          );
-        }
+      context: context,
+      builder: (context) {
+        return DialogBox(
+          titleController: _titleController,
+          descController: _descController,
+          onSave: (isHighPriority, timerText) {
+            saveNewTask(isHighPriority, timerText);
+          },
+          onCancel: () => Navigator.of(context).pop(),
+        );
+      },
     );
   }
 
@@ -247,7 +280,7 @@ class _HomepageState extends State<Homepage> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFD4B483).withOpacity(0.2),
+                          color: const Color(0xFFD4B483).withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: const Text(
@@ -261,41 +294,62 @@ class _HomepageState extends State<Homepage> {
                       ),
                     ],
                   ),
-                  TextButton(
-                    onPressed: () {},
-                    child: Row(
-                      children: const [
-                        Text("View Schedule", style: TextStyle(color: Colors.white38, fontSize: 12)),
-                        Icon(Icons.keyboard_arrow_down, size: 16, color: Colors.white38),
-                      ],
-                    ),
-                  ),
                 ],
               ),
             ),
 
-            // Tasks List
+            const SizedBox(height: 10),
+
+            // Tasks List or Empty State
             Expanded(
-              child: ListView.builder(
-                itemCount: filteredTasks.length,
-                itemBuilder: (context, index) {
-                  int originalIndex = db.toDoList.indexOf(filteredTasks[index]);
-                  return ToDoTile(
-                    taskName: filteredTasks[index][0],
-                    taskCompleted: filteredTasks[index][1],
-                    isHighPriority: filteredTasks[index][2],
-                    timerInSeconds: filteredTasks[index][3],
-                    description: filteredTasks[index].length > 4 ? filteredTasks[index][4] : "",
-                    taskTime: filteredTasks[index].length > 5 ? filteredTasks[index][5] : "",
-                    onChanged: (value) => checkBoxChanged(value, originalIndex),
-                    deleteFunction: (context) => deleteTask(originalIndex),
-                    editFunction: () => editTask(originalIndex),
-                  );
-                },
-              ),
+              child: filteredTasks.isEmpty
+                  ? _buildEmptyState()
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 80),
+                      itemCount: filteredTasks.length,
+                      itemBuilder: (context, index) {
+                        var taskItem = filteredTasks[index];
+                        int originalIndex = db.toDoList.indexOf(taskItem);
+                        dynamic taskId = taskItem.length > 6 ? taskItem[6] : originalIndex;
+
+                        return ToDoTile(
+                          key: ValueKey(taskId),
+                          taskName: taskItem[0],
+                          taskCompleted: taskItem[1],
+                          isHighPriority: taskItem[2],
+                          timerInSeconds: taskItem[3],
+                          description: taskItem.length > 4 ? taskItem[4] : "",
+                          taskTime: taskItem.length > 5 ? taskItem[5] : "",
+                          onChanged: (value) => checkBoxChanged(value, originalIndex),
+                          deleteFunction: (context) => deleteTask(originalIndex),
+                          editFunction: () => editTask(originalIndex),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(Icons.task_alt, size: 64, color: Colors.white24),
+          SizedBox(height: 16),
+          Text(
+            "No tasks found",
+            style: TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          SizedBox(height: 8),
+          Text(
+            "Tap + to create a new task",
+            style: TextStyle(color: Colors.white38, fontSize: 14),
+          ),
+        ],
       ),
     );
   }

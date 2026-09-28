@@ -33,14 +33,17 @@ class Todo {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        "id": id,
-        "title": title,
-        "description": description,
-        "completed": completed,
-        "dueDate": dueDate,
-        "profileId": profileId,
-      };
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = <String, dynamic>{
+      "title": title,
+      "completed": completed,
+    };
+    if (id != null) data['id'] = id;
+    if (description != null) data['description'] = description;
+    if (dueDate != null) data['dueDate'] = dueDate;
+    if (profileId != null) data['profileId'] = profileId;
+    return data;
+  }
 
   Todo copyWith({
     int? id,

@@ -5,7 +5,7 @@ import 'package:todo_app/data/database.dart';
 import 'package:todo_app/pages/homepage.dart';
 import 'package:todo_app/pages/goals_page.dart';
 import 'package:todo_app/pages/notes_page.dart';
-import 'package:todo_app/pages/main_layout.dart';
+import 'package:todo_app/pages/calendar_page.dart';
 import 'package:todo_app/pages/profile_page.dart';
 
 class HomeContent extends StatefulWidget {
@@ -17,7 +17,6 @@ class HomeContent extends StatefulWidget {
 
 class _HomeContentState extends State<HomeContent> {
   ToDoDatabase db = ToDoDatabase();
-
   bool _isLoading = true;
 
   @override
@@ -33,6 +32,10 @@ class _HomeContentState extends State<HomeContent> {
         _isLoading = false;
       });
     }
+  }
+
+  void _navigateToPage(Widget page) {
+    Navigator.push(context, MaterialPageRoute(builder: (context) => page)).then((_) => _refreshData());
   }
 
   @override
@@ -64,11 +67,13 @@ class _HomeContentState extends State<HomeContent> {
 
     List recentTasks = db.toDoList.take(3).map((e) => e[0].toString()).toList();
     String latestNote = db.notesList.isNotEmpty ? db.notesList[0][0] : "No notes yet";
-    String latestNoteContent = db.notesList.isNotEmpty ? db.notesList[0][1] : "Tap 'Notes' to add one.";
+    String latestNoteContent = db.notesList.isNotEmpty ? db.notesList[0][1] : "Tap to add notes";
     
     var todayData = db.getDataForDate(DateTime.now());
     List meetings = todayData["meetings"] ?? [];
     String nextMeeting = meetings.isNotEmpty ? meetings[0]['title'] : "No meetings today";
+
+    String imagePath = db.profileData["imagePath"] ?? "";
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -106,25 +111,14 @@ class _HomeContentState extends State<HomeContent> {
                   Row(
                     children: [
                       GestureDetector(
-                        onTap: () {
-                          // Find the MainLayout state and change index to 4 (Profile)
-                          final mainLayoutState = context.findAncestorStateOfType<State<MainLayout>>();
-                          if (mainLayoutState != null) {
-                            // This depends on how MainLayout is structured, 
-                            // but usually we can use a callback or index provider.
-                            // For now, let's use a standard navigation push for immediate result
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfilePage()));
-                          } else {
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfilePage()));
-                          }
-                        },
+                        onTap: () => _navigateToPage(const ProfilePage()),
                         child: CircleAvatar(
                           radius: 18,
-                          backgroundColor: Colors.grey,
-                          backgroundImage: db.profileData["imagePath"] != null && db.profileData["imagePath"].isNotEmpty && File(db.profileData["imagePath"]).existsSync()
-                              ? FileImage(File(db.profileData["imagePath"]))
+                          backgroundColor: Colors.grey[800],
+                          backgroundImage: imagePath.isNotEmpty && File(imagePath).existsSync()
+                              ? FileImage(File(imagePath))
                               : null,
-                          child: db.profileData["imagePath"] == null || db.profileData["imagePath"].isEmpty || !File(db.profileData["imagePath"]).existsSync()
+                          child: imagePath.isEmpty || !File(imagePath).existsSync()
                               ? const Icon(Icons.person, size: 20, color: Colors.white)
                               : null,
                         ),
@@ -161,17 +155,22 @@ class _HomeContentState extends State<HomeContent> {
                     _buildCategoryItem(
                       Icons.check_box_outlined, 
                       "To-do",
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => Homepage())).then((_) => _refreshData()),
+                      onTap: () => _navigateToPage(const Homepage()),
                     ),
                     _buildCategoryItem(
                       Icons.trending_up, 
                       "Progress",
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => GoalsPage())),
+                      onTap: () => _navigateToPage(const GoalsPage()),
                     ),
                     _buildCategoryItem(
                       Icons.edit_note, 
                       "Notes",
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => NotesPage())).then((_) => _refreshData()),
+                      onTap: () => _navigateToPage(const NotesPage()),
+                    ),
+                    _buildCategoryItem(
+                      Icons.calendar_today_outlined, 
+                      "Calendar",
+                      onTap: () => _navigateToPage(const CalendarPage()),
                     ),
                   ],
                 ),
@@ -179,8 +178,8 @@ class _HomeContentState extends State<HomeContent> {
               const SizedBox(height: 35),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
+                children: const [
+                  Text(
                     "Overview",
                     style: TextStyle(
                       color: Colors.white,
@@ -198,6 +197,7 @@ class _HomeContentState extends State<HomeContent> {
                     child: _buildHighlightCard(
                       "Tasks Today",
                       recentTasks.isEmpty ? ["No tasks for today"] : recentTasks.cast<String>(),
+                      onTap: () => _navigateToPage(const Homepage()),
                     ),
                   ),
                   const SizedBox(width: 15),
@@ -207,13 +207,15 @@ class _HomeContentState extends State<HomeContent> {
                         _buildSmallHighlightCard(
                           "Recent Note", 
                           latestNote,
-                          content: latestNoteContent
+                          content: latestNoteContent,
+                          onTap: () => _navigateToPage(const NotesPage()),
                         ),
                         const SizedBox(height: 15),
                         _buildSmallHighlightCard(
                           "Next Meeting", 
                           nextMeeting,
-                          isMeeting: true
+                          isMeeting: true,
+                          onTap: () => _navigateToPage(const CalendarPage()),
                         ),
                       ],
                     ),
@@ -236,7 +238,7 @@ class _HomeContentState extends State<HomeContent> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E1E1E),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white.withOpacity(0.05)),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
                 ),
                 child: Column(
                   children: [
@@ -285,7 +287,7 @@ class _HomeContentState extends State<HomeContent> {
               decoration: BoxDecoration(
                 color: isSelected ? const Color(0xFFD4B483) : const Color(0xFF1E1E1E),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: isSelected ? Colors.transparent : Colors.white.withOpacity(0.05)),
+                border: Border.all(color: isSelected ? Colors.transparent : Colors.white.withValues(alpha: 0.05)),
               ),
               child: Icon(
                 icon, 
@@ -308,87 +310,105 @@ class _HomeContentState extends State<HomeContent> {
     );
   }
 
-  Widget _buildHighlightCard(String title, List<String> items) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(25),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 20),
-          ...items.map((item) => Padding(
-            padding: const EdgeInsets.only(bottom: 15.0),
-            child: Row(
+  Widget _buildHighlightCard(String title, List<String> items, {VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E1E),
+          borderRadius: BorderRadius.circular(25),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Icon(Icons.circle, size: 8, color: Color(0xFFD4B483)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    item, 
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  )
+                Text(
+                  title,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
+                const Icon(Icons.arrow_forward_ios, size: 12, color: Color(0xFFD4B483)),
               ],
             ),
-          )),
-        ],
+            const SizedBox(height: 20),
+            ...items.map((item) => Padding(
+              padding: const EdgeInsets.only(bottom: 15.0),
+              child: Row(
+                children: [
+                  const Icon(Icons.circle, size: 8, color: Color(0xFFD4B483)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      item, 
+                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    )
+                  ),
+                ],
+              ),
+            )),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildSmallHighlightCard(String title, String subtitle, {String content = "", bool isMeeting = false}) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(25),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isMeeting ? Icons.videocam_outlined : Icons.description_outlined, 
-                color: const Color(0xFFD4B483), 
-                size: 16
-              ),
-              const SizedBox(width: 8),
-              Text(
-                title, 
-                style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11)
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            subtitle, 
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          if (content.isNotEmpty) ...[
-            const SizedBox(height: 6),
+  Widget _buildSmallHighlightCard(String title, String subtitle, {String content = "", bool isMeeting = false, VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E1E),
+          borderRadius: BorderRadius.circular(25),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      isMeeting ? Icons.videocam_outlined : Icons.description_outlined, 
+                      color: const Color(0xFFD4B483), 
+                      size: 16
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      title, 
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11)
+                    ),
+                  ],
+                ),
+                const Icon(Icons.arrow_forward_ios, size: 12, color: Color(0xFFD4B483)),
+              ],
+            ),
+            const SizedBox(height: 10),
             Text(
-              content, 
-              style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+              subtitle, 
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-          ]
-        ],
+            if (content.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                content, 
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 12),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ]
+          ],
+        ),
       ),
     );
   }

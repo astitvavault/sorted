@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:todo_app/data/database.dart';
-
 import 'package:todo_app/pages/profile_manager_page.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -14,11 +13,21 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   final ToDoDatabase db = ToDoDatabase();
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    db.loadData();
+    _loadProfileData();
+  }
+
+  Future<void> _loadProfileData() async {
+    await db.loadData();
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   int _calculateAge(DateTime birthDate) {
@@ -32,11 +41,18 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF121212),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFD4B483))),
+      );
+    }
+
     final profile = db.profileData;
-    final String name = profile["name"] ?? "Anonymous";
-    final String bio = profile["bio"] ?? "No bio added.";
-    final String imagePath = profile["imagePath"] ?? "";
-    final DateTime? birthDate = profile["birthDate"] != null ? DateTime.parse(profile["birthDate"]) : null;
+    final String name = (profile["fullName"] as String?) ?? (profile["name"] as String?) ?? "Anonymous";
+    final String bio = (profile["bio"] as String?) ?? "No bio added.";
+    final String imagePath = (profile["imagePath"] as String?) ?? (profile["profileImage"] as String?) ?? "";
+    final DateTime? birthDate = profile["birthDate"] != null ? DateTime.tryParse(profile["birthDate"].toString()) : null;
     
     int? age;
     if (birthDate != null) {
@@ -52,7 +68,7 @@ class _ProfilePageState extends State<ProfilePage> {
         centerTitle: true,
         actions: [
           IconButton(
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileManagerPage())),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileManagerPage())).then((_) => _loadProfileData()),
             icon: const Icon(Icons.group_outlined, color: Color(0xFFD4B483)),
           )
         ],
@@ -72,7 +88,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   border: Border.all(color: const Color(0xFFD4B483), width: 3),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFD4B483).withOpacity(0.1),
+                      color: const Color(0xFFD4B483).withValues(alpha: 0.1),
                       blurRadius: 20,
                       spreadRadius: 5,
                     )
@@ -98,9 +114,12 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ),
             if (age != null)
-              Text(
-                "$age years old",
-                style: const TextStyle(color: Color(0xFFD4B483), fontSize: 16, fontWeight: FontWeight.w500),
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text(
+                  "$age years old",
+                  style: const TextStyle(color: Color(0xFFD4B483), fontSize: 16, fontWeight: FontWeight.w500),
+                ),
               ),
             
             const SizedBox(height: 40),
@@ -116,11 +135,11 @@ class _ProfilePageState extends State<ProfilePage> {
             
             const SizedBox(height: 40),
             
-            // Lock Message
+            // Info Note
             Container(
               padding: const EdgeInsets.all(15),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.03),
+                color: Colors.white.withValues(alpha: 0.03),
                 borderRadius: BorderRadius.circular(15),
               ),
               child: Row(
@@ -129,7 +148,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   SizedBox(width: 15),
                   Expanded(
                     child: Text(
-                      "Profile information is locked and saved locally. It can only be changed by clearing app data.",
+                      "Profile information is locked and saved locally and synced with your backend.",
                       style: TextStyle(color: Colors.white24, fontSize: 12),
                     ),
                   ),
@@ -149,7 +168,7 @@ class _ProfilePageState extends State<ProfilePage> {
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E1E),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -160,7 +179,7 @@ class _ProfilePageState extends State<ProfilePage> {
               const SizedBox(width: 10),
               Text(
                 title,
-                style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14, fontWeight: FontWeight.bold),
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 14, fontWeight: FontWeight.bold),
               ),
             ],
           ),

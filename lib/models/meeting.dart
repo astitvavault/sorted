@@ -29,15 +29,18 @@ class Meeting {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        "id": id,
-        "title": title,
-        "agenda": agenda,
-        "meetingTime": meetingTime,
-        "participants": participants,
-        "location": location,
-        "profileId": profileId,
-      };
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = <String, dynamic>{
+      "title": title,
+    };
+    if (id != null) data['id'] = id;
+    if (agenda != null) data['agenda'] = agenda;
+    if (meetingTime != null) data['meetingTime'] = meetingTime;
+    if (participants != null) data['participants'] = participants;
+    if (location != null) data['location'] = location;
+    if (profileId != null) data['profileId'] = profileId;
+    return data;
+  }
 
   Meeting copyWith({
     int? id,

@@ -9,12 +9,12 @@ class ToDoTile extends StatefulWidget {
   final bool isHighPriority;
   final String description;
   final String taskTime;
-  Function(bool?)? onChanged;
-  Function(BuildContext)? deleteFunction;
-  VoidCallback? editFunction;
+  final ValueChanged<bool?>? onChanged;
+  final void Function(BuildContext)? deleteFunction;
+  final VoidCallback? editFunction;
   final int timerInSeconds;
 
-  ToDoTile({
+  const ToDoTile({
     super.key,
     required this.taskName,
     required this.taskCompleted,
@@ -32,30 +32,35 @@ class ToDoTile extends StatefulWidget {
 }
 
 class _ToDoTileState extends State<ToDoTile> {
-  late int _remainingTime;
+  int _remainingTime = 0;
   Timer? _timer;
 
   void _startTimer() {
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_remainingTime > 0) {
-        setState(() {
-          _remainingTime--;
-        });
+        if (mounted) {
+          setState(() {
+            _remainingTime--;
+          });
+        }
       } else {
         _timer?.cancel();
       }
     });
   }
 
-  @override
-  void initState() {
-    super.initState();
+  void _calculateRemainingTime() {
     _remainingTime = 0;
     if (widget.isHighPriority && widget.timerInSeconds > 0) {
       int now = DateTime.now().millisecondsSinceEpoch;
-      _remainingTime = ((widget.timerInSeconds - now) / 1000).floor();
+      if (widget.timerInSeconds > 1000000000) {
+        _remainingTime = ((widget.timerInSeconds - now) / 1000).floor();
+      } else {
+        _remainingTime = widget.timerInSeconds;
+      }
 
-      if (_remainingTime > 0) {
+      if (_remainingTime > 0 && !widget.taskCompleted) {
         _startTimer();
       } else {
         _remainingTime = 0;
@@ -64,16 +69,20 @@ class _ToDoTileState extends State<ToDoTile> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _calculateRemainingTime();
+  }
+
+  @override
   void didUpdateWidget(covariant ToDoTile oldWidget) {
     super.didUpdateWidget(oldWidget);
-
     if (widget.taskCompleted) {
       _timer?.cancel();
-    } else if (!widget.taskCompleted &&
-        widget.isHighPriority &&
-        _remainingTime > 0 &&
-        !(_timer?.isActive ?? false)) {
-      _startTimer();
+      _remainingTime = 0;
+    } else if (oldWidget.timerInSeconds != widget.timerInSeconds ||
+        oldWidget.isHighPriority != widget.isHighPriority) {
+      _calculateRemainingTime();
     }
   }
 
@@ -102,9 +111,9 @@ class _ToDoTileState extends State<ToDoTile> {
               child: Container(
                 margin: const EdgeInsets.only(left: 15),
                 decoration: BoxDecoration(
-                  color: Colors.redAccent.withOpacity(0.15),
+                  color: Colors.redAccent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                  border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
                 ),
                 child: const Center(
                   child: Icon(Icons.delete_outline, color: Colors.redAccent, size: 28),
@@ -118,7 +127,7 @@ class _ToDoTileState extends State<ToDoTile> {
           decoration: BoxDecoration(
             color: const Color(0xFF1E1E1E),
             borderRadius: BorderRadius.circular(25),
-            border: Border.all(color: Colors.white.withOpacity(0.05)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
           ),
           child: Column(
             children: [
@@ -165,10 +174,11 @@ class _ToDoTileState extends State<ToDoTile> {
                                 ),
                               ),
                             ),
-                            GestureDetector(
-                              onTap: widget.editFunction,
-                              child: const Icon(Icons.edit_outlined, color: Colors.white38, size: 20),
-                            ),
+                            if (widget.editFunction != null)
+                              GestureDetector(
+                                onTap: widget.editFunction,
+                                child: const Icon(Icons.edit_outlined, color: Colors.white38, size: 20),
+                              ),
                           ],
                         ),
                         const SizedBox(height: 6),
@@ -195,8 +205,8 @@ class _ToDoTileState extends State<ToDoTile> {
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
                                 color: widget.isHighPriority 
-                                    ? const Color(0xFFD4B483).withOpacity(0.2)
-                                    : Colors.white.withOpacity(0.05),
+                                    ? const Color(0xFFD4B483).withValues(alpha: 0.2)
+                                    : Colors.white.withValues(alpha: 0.05),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(

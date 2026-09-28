@@ -23,13 +23,16 @@ class Reminder {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        "id": id,
-        "title": title,
-        "reminderTime": reminderTime,
-        "triggered": triggered,
-        "profileId": profileId,
-      };
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = <String, dynamic>{
+      "title": title,
+      "triggered": triggered,
+    };
+    if (id != null) data['id'] = id;
+    if (reminderTime != null) data['reminderTime'] = reminderTime;
+    if (profileId != null) data['profileId'] = profileId;
+    return data;
+  }
 
   Reminder copyWith({
     int? id,

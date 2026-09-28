@@ -33,6 +33,8 @@ class _NotesPageState extends State<NotesPage> {
   }
 
   void _addNote() {
+    _titleController.clear();
+    _contentController.clear();
     showDialog(
       context: context,
       builder: (context) => _buildNoteDialog(),
@@ -53,10 +55,14 @@ class _NotesPageState extends State<NotesPage> {
     setState(() {
       db.notesList.removeAt(index);
     });
+    await db.updateData();
     if (id != null) {
-      await _noteService.deleteNote(id);
+      try {
+        await _noteService.deleteNote(id);
+      } catch (e) {
+        print("Failed to delete note from backend: $e");
+      }
     }
-    db.updateData();
   }
 
   Widget _buildNoteDialog({int? index}) {
@@ -67,7 +73,7 @@ class _NotesPageState extends State<NotesPage> {
         decoration: BoxDecoration(
           color: const Color(0xFF1E1E1E),
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: Colors.white.withOpacity(0.05)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
         ),
         child: SingleChildScrollView(
           child: Column(
@@ -92,7 +98,7 @@ class _NotesPageState extends State<NotesPage> {
               TextField(
                 controller: _contentController,
                 style: const TextStyle(color: Colors.white70),
-                maxLines: 10,
+                maxLines: 8,
                 decoration: _inputDecoration("Content"),
               ),
               const SizedBox(height: 32),
@@ -110,31 +116,58 @@ class _NotesPageState extends State<NotesPage> {
                   const SizedBox(width: 12),
                   ElevatedButton(
                     onPressed: () async {
-                      String title = _titleController.text;
-                      String content = _contentController.text;
+                      String title = _titleController.text.trim();
+                      String content = _contentController.text.trim();
 
-                      int? profileId = db.profileData["id"];
-                      if (profileId == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No active profile")));
+                      if (title.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("Title cannot be empty")),
+                        );
                         return;
                       }
 
+                      int? profileId = db.profileData["id"];
+                      int localId = DateTime.now().millisecondsSinceEpoch % 2147483647;
+
                       if (index == null) {
-                        Note newNote = Note(title: title, content: content, profileId: profileId);
-                        Note created = await _noteService.createNote(newNote);
+                        // Save locally first
+                        var newNoteItem = [title, content, "", localId];
                         setState(() {
-                          db.notesList.insert(0, [created.title, created.content, "", created.id]);
+                          db.notesList.insert(0, newNoteItem);
                         });
+                        await db.updateData();
+
+                        // Sync with backend if profile exists
+                        if (profileId != null) {
+                          try {
+                            Note newNote = Note(title: title, content: content, profileId: profileId);
+                            Note created = await _noteService.createNote(newNote);
+                            final createdId = created.id;
+                            if (createdId != null) {
+                              newNoteItem[3] = createdId;
+                              await db.updateData();
+                            }
+                          } catch (e) {
+                            print("Backend note creation error (saved locally): $e");
+                          }
+                        }
                       } else {
-                        int id = db.notesList[index][3];
-                        Note updatedNote = Note(id: id, title: title, content: content, profileId: profileId);
-                        await _noteService.updateNote(id, updatedNote);
+                        int noteId = db.notesList[index].length > 3 ? db.notesList[index][3] : localId;
                         setState(() {
-                          db.notesList[index] = [title, content, "", id];
+                          db.notesList[index] = [title, content, "", noteId];
                         });
+                        await db.updateData();
+
+                        if (profileId != null && noteId != localId) {
+                          try {
+                            Note updatedNote = Note(id: noteId, title: title, content: content, profileId: profileId);
+                            await _noteService.updateNote(noteId, updatedNote);
+                          } catch (e) {
+                            print("Backend note update error (saved locally): $e");
+                          }
+                        }
                       }
                       
-                      db.updateData();
                       _titleController.clear();
                       _contentController.clear();
                       if (mounted) {
@@ -163,7 +196,7 @@ class _NotesPageState extends State<NotesPage> {
       hintText: hint,
       hintStyle: const TextStyle(color: Colors.white24),
       filled: true,
-      fillColor: Colors.white.withOpacity(0.03),
+      fillColor: Colors.white.withValues(alpha: 0.03),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       enabledBorder: OutlineInputBorder(
         borderSide: BorderSide.none,
@@ -195,9 +228,21 @@ class _NotesPageState extends State<NotesPage> {
       ),
       body: db.notesList.isEmpty
           ? Center(
-              child: Text(
-                "No notes yet.",
-                style: TextStyle(color: Colors.white.withOpacity(0.3)),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(Icons.edit_note, size: 64, color: Colors.white24),
+                  SizedBox(height: 16),
+                  Text(
+                    "No notes yet.",
+                    style: TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    "Tap + to create a note",
+                    style: TextStyle(color: Colors.white38, fontSize: 14),
+                  ),
+                ],
               ),
             )
           : GridView.builder(
@@ -217,7 +262,7 @@ class _NotesPageState extends State<NotesPage> {
                     decoration: BoxDecoration(
                       color: const Color(0xFF1E1E1E),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withOpacity(0.05)),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -247,15 +292,10 @@ class _NotesPageState extends State<NotesPage> {
                         Expanded(
                           child: Text(
                             db.notesList[index][1],
-                            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13),
                             maxLines: 5,
                             overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          db.notesList[index][2],
-                          style: TextStyle(color: Colors.white.withOpacity(0.2), fontSize: 10),
                         ),
                       ],
                     ),

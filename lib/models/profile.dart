@@ -23,13 +23,16 @@ class Profile {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        "id": id,
-        "profileImage": profileImage,
-        "fullName": fullName,
-        "birthDate": birthDate,
-        "bio": bio,
-      };
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = <String, dynamic>{
+      "fullName": fullName,
+    };
+    if (id != null) data['id'] = id;
+    if (profileImage != null) data['profileImage'] = profileImage;
+    if (birthDate != null) data['birthDate'] = birthDate;
+    if (bio != null) data['bio'] = bio;
+    return data;
+  }
 
   Profile copyWith({
     int? id,
