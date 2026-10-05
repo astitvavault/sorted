@@ -1,16 +1,43 @@
-# Sorted
+Sorted
+To defy all odds. Mental toughness is a lifestyle.
 
-A sleek, modern task management app inspired by MindFlow and productivity principles, redesigned with a beige-accented dark theme.
+Sorted is an Android app built for people who struggle with follow-through, not planning. Inspired by the philosophy of David Goggins, it replaces the usual to-do list experience with a daily discipline system: start the day anchored in the right mindset, execute what matters, and see your consistency over time.
 
-## Getting Started
+No ads. No subscriptions. No clutter.
 
-This project is a starting point for a Flutter application.
+Live site and APK download: https://sorted-lovat.vercel.app/
 
-A few resources to get you started if this is your first Flutter project:
+Tech Stack: 
+Layer	Technology
+Mobile app	Flutter, Dart
+Backend	Spring Boot, REST APIs
+Database	Supabase (PostgreSQL)
+Deployment	Docker, Vercel (landing page)
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Architecture: 
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Flutter app (Android)
+        |
+        |  REST API (JSON over HTTPS)
+        v
+Spring Boot backend
+        |
+        v
+Supabase (PostgreSQL)
+
+
+Backend Repository:
+
+The Spring Boot REST API that powers this app lives in its own repository:
+https://github.com/astitvavault/sorted_backend
+
+Install on Android: 
+
+1. Download the APK from the Sorted website.
+2. Open the file and, if prompted, allow installation from this source.
+3. Tap Install and launch Sorted.
+
+
+Author:
+Astitva GitHub: @astitvavault
+
